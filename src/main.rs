@@ -1,4 +1,4 @@
-use core::slice::{self, from_raw_parts_mut};
+use core::slice::from_raw_parts_mut;
 use std::{
     fs::File,
     io::{BufReader, Read, Seek, Write},
@@ -31,6 +31,8 @@ fn read_header(reader: &mut BufReader<&mut File>) -> BmpHeader {
     let mut header = BmpHeader::default();
     let header_size = size_of::<BmpHeader>();
 
+    // reads directly into struct by converting it as slice pointer
+    // it points to the first element in the struct
     let header_slice = unsafe { from_raw_parts_mut(&mut header as *mut _ as *mut u8, header_size) };
 
     println!("reading {} bytes", header_size);
@@ -43,6 +45,8 @@ fn read_header(reader: &mut BufReader<&mut File>) -> BmpHeader {
 }
 
 fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
+
+    // header offset value contains the amount of bytes from the start to the pixel data
     reader
         .seek(std::io::SeekFrom::Start(header.data_offset as u64))
         .unwrap();
@@ -51,18 +55,25 @@ fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
 
     reader.read_to_end(&mut pixel_data).unwrap();
 
+    // bmp stores pixels 'flipped', so it looks upside down
+    // to transform, need to reverse the pixels to flip vertically
+    // and then reverse each row to flip horizontally
+
     // flip vertically
     pixel_data.reverse();
 
+    // collapsing the 4 pixels per point into 1 pixel per point
     let mut pixel_data: Vec<u8> = pixel_data
         .chunks_exact(4)
         .map(|chunk| if *chunk.first().unwrap() > 0 { 1 } else { 0 })
         .collect();
 
+    // flip horizontally
     pixel_data
         .chunks_exact_mut(header.width as usize)
         .for_each(|row| row.reverse());
 
+    // encode into chunks of 8 bits (1 byte)
     let pixel_data: Vec<u8> = pixel_data
         .chunks_exact(8) // encoding into a byte (size 8)
         .map(|c| {
@@ -102,6 +113,8 @@ fn main() {
 
         let pixel_data = read_pixels(reader, header);
 
+        // decode
+
         for chunk in pixel_data.chunks_exact(2) {
             for num in chunk {
                 for bit_set in 0..8 {
@@ -118,7 +131,17 @@ fn main() {
             println!()
         }
 
-        output_file.write_all(&pixel_data.as_slice()).unwrap();
+        let mut output_string = String::from_str("[").unwrap();
+
+        for num in pixel_data.into_iter() {
+            output_string.push_str(&num.to_string());
+            output_string.push(',');
+            output_string.push(' ');
+        }
+
+        output_string.push(']');
+
+        output_file.write_all(output_string.as_bytes()).unwrap();
         output_file.write(b"\n").unwrap();
     }
 }
