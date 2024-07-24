@@ -1,6 +1,8 @@
-use core::slice;
+use core::slice::{self, from_raw_parts_mut};
 use std::{
-    io::{BufReader, Read, Seek},
+    fs::File,
+    io::{BufReader, Read, Seek, Write},
+    mem::size_of,
     path::PathBuf,
     str::FromStr,
 };
@@ -25,62 +27,98 @@ struct BmpHeader {
     // ... other optional header fields (compression, color table size, etc.)
 }
 
+fn read_header(reader: &mut BufReader<&mut File>) -> BmpHeader {
+    let mut header = BmpHeader::default();
+    let header_size = size_of::<BmpHeader>();
+
+    let header_slice = unsafe { from_raw_parts_mut(&mut header as *mut _ as *mut u8, header_size) };
+
+    println!("reading {} bytes", header_size);
+    reader
+        .read_exact(header_slice)
+        .expect("expecting at least enough bytes to read header");
+
+    dbg!(&header);
+    header
+}
+
+fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
+    reader
+        .seek(std::io::SeekFrom::Start(header.data_offset as u64))
+        .unwrap();
+
+    let mut pixel_data = Vec::new();
+
+    reader.read_to_end(&mut pixel_data).unwrap();
+
+    // flip vertically
+    pixel_data.reverse();
+
+    let mut pixel_data: Vec<u8> = pixel_data
+        .chunks_exact(4)
+        .map(|chunk| if *chunk.first().unwrap() > 0 { 1 } else { 0 })
+        .collect();
+
+    pixel_data
+        .chunks_exact_mut(header.width as usize)
+        .for_each(|row| row.reverse());
+
+    let pixel_data: Vec<u8> = pixel_data
+        .chunks_exact(8) // encoding into a byte (size 8)
+        .map(|c| {
+            let mut result = 0u8;
+
+            for (idx, item) in c.iter().enumerate() {
+                result |= *item << 7 - idx;
+            }
+
+            result
+        })
+        .collect();
+
+    pixel_data
+}
+
 fn main() {
     let path = PathBuf::from_str("images").unwrap();
+    let mut output_path = PathBuf::from_str("output").unwrap();
+    std::fs::create_dir_all(&output_path).unwrap();
+
+    output_path.push("result.txt");
+
+    let mut output_file = File::create(output_path).unwrap();
 
     for entry in std::fs::read_dir(path).unwrap() {
         let entry = entry.unwrap();
 
         let filepath = entry.path();
+
         dbg!(&filepath);
-        let mut file = std::fs::File::open(filepath).unwrap();
+        let mut file = File::open(filepath).unwrap();
 
         let mut reader = BufReader::new(&mut file);
 
-        let mut header = BmpHeader::default();
-        let header_size = std::mem::size_of::<BmpHeader>();
+        let header = read_header(&mut reader);
 
-        let header_slice =
-            unsafe { slice::from_raw_parts_mut(&mut header as *mut _ as *mut u8, header_size) };
+        let pixel_data = read_pixels(reader, header);
 
-        println!("reading {} bytes", header_size);
-        reader.read_exact(header_slice).unwrap();
-        dbg!(&header);
+        for chunk in pixel_data.chunks_exact(2) {
+            for num in chunk {
+                for bit_set in 0..8 {
+                    let value = (*num << bit_set) & 128;
 
-        reader
-            .seek(std::io::SeekFrom::Start(header.data_offset as u64))
-            .unwrap();
-
-        let mut pixel_data = Vec::new();
-
-        reader.read_to_end(&mut pixel_data).unwrap();
-
-        let mut result_upside_down = [0u8; 16 * 32];
-        let mut index = 0usize;
-
-        for pixel_data in pixel_data.chunks_exact(4) {
-            let first = pixel_data.first().unwrap();
-            if *first > 0 {
-                result_upside_down[index] = 1;
+                    if value > 0 {
+                        print!("{}", 1);
+                    } else {
+                        print!("{}", 0);
+                    }
+                }
             }
 
-            index += 1
+            println!()
         }
 
-        let mut result = [0u8; 2 * 32];
-        index = 0usize;
-
-        for chunk in result_upside_down.chunks_exact_mut(8).rev() {
-            for (idx, num) in chunk.iter().enumerate() {
-                result[index] |= *num << 7 - idx;
-            }
-
-            dbg!(index, &result[index]);
-            index += 1;
-        }
-
-        dbg!(result);
-
-        break;
+        output_file.write_all(&pixel_data.as_slice()).unwrap();
+        output_file.write(b"\n").unwrap();
     }
 }
