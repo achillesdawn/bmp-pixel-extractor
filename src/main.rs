@@ -45,7 +45,6 @@ fn read_header(reader: &mut BufReader<&mut File>) -> BmpHeader {
 }
 
 fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
-
     // header offset value contains the amount of bytes from the start to the pixel data
     reader
         .seek(std::io::SeekFrom::Start(header.data_offset as u64))
@@ -55,7 +54,7 @@ fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
 
     reader.read_to_end(&mut pixel_data).unwrap();
 
-    // bmp stores pixels 'flipped', so it looks upside down
+    // bmp stores pixels 'flipped', so pixels appear upside down
     // to transform, need to reverse the pixels to flip vertically
     // and then reverse each row to flip horizontally
 
@@ -143,5 +142,36 @@ fn main() {
 
         output_file.write_all(output_string.as_bytes()).unwrap();
         output_file.write(b"\n").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{error::Error, fs::File, io::BufReader, path::PathBuf, str::FromStr};
+
+    use crate::read_header;
+
+    #[test]
+    fn read_header_test() -> Result<(), Box<dyn Error>> {
+        let paths = [
+            PathBuf::from_str("tests/test1.bmp")?,
+            PathBuf::from_str("tests/test2.bmp")?,
+        ];
+
+        for path in paths.into_iter() {
+            let mut file = File::open(path)?;
+
+            let mut reader = BufReader::new(&mut file);
+
+            let header = read_header(&mut reader);
+
+            let width = header.width;
+            let height = header.height;
+
+            assert_eq!(width, 16);
+            assert_eq!(height, 32);
+        }
+
+        Ok(())
     }
 }
