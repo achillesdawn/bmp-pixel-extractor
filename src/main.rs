@@ -44,7 +44,7 @@ fn read_header(reader: &mut BufReader<&mut File>) -> BmpHeader {
     header
 }
 
-fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
+fn read_pixels(mut reader: BufReader<&mut File>, header: &BmpHeader) -> Vec<u8> {
     // header offset value contains the amount of bytes from the start to the pixel data
     reader
         .seek(std::io::SeekFrom::Start(header.data_offset as u64))
@@ -54,6 +54,10 @@ fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
 
     reader.read_to_end(&mut pixel_data).unwrap();
 
+    pixel_data
+}
+
+fn encode_into_bytes(mut pixel_data: Vec<u8>, header: &BmpHeader) -> Vec<u8> {
     // bmp stores pixels 'flipped', so pixels appear upside down
     // to transform, need to reverse the pixels to flip vertically
     // and then reverse each row to flip horizontally
@@ -89,6 +93,39 @@ fn read_pixels(mut reader: BufReader<&mut File>, header: BmpHeader) -> Vec<u8> {
     pixel_data
 }
 
+fn decode_bytes(pixel_data: &Vec<u8>) {
+    for chunk in pixel_data.chunks_exact(2) {
+        for num in chunk {
+            for bit_set in 0..8 {
+                let value = (*num << bit_set) & 128;
+
+                if value > 0 {
+                    print!("{}", 1);
+                } else {
+                    print!("{}", 0);
+                }
+            }
+        }
+
+        println!()
+    }
+}
+
+fn write_to_file(pixel_data: &Vec<u8>, output_file: &mut File) {
+    let mut output_string = String::from_str("[").unwrap();
+
+    for num in pixel_data.into_iter() {
+        output_string.push_str(&num.to_string());
+        output_string.push(',');
+        output_string.push(' ');
+    }
+
+    output_string.push(']');
+
+    output_file.write_all(output_string.as_bytes()).unwrap();
+    output_file.write(b"\n").unwrap();
+}
+
 fn main() {
     let path = PathBuf::from_str("images").unwrap();
     let mut output_path = PathBuf::from_str("output").unwrap();
@@ -110,38 +147,13 @@ fn main() {
 
         let header = read_header(&mut reader);
 
-        let pixel_data = read_pixels(reader, header);
+        let pixel_data = read_pixels(reader, &header);
 
-        // decode
+        let encoded = encode_into_bytes(pixel_data, &header);
 
-        for chunk in pixel_data.chunks_exact(2) {
-            for num in chunk {
-                for bit_set in 0..8 {
-                    let value = (*num << bit_set) & 128;
+        decode_bytes(&encoded);
 
-                    if value > 0 {
-                        print!("{}", 1);
-                    } else {
-                        print!("{}", 0);
-                    }
-                }
-            }
-
-            println!()
-        }
-
-        let mut output_string = String::from_str("[").unwrap();
-
-        for num in pixel_data.into_iter() {
-            output_string.push_str(&num.to_string());
-            output_string.push(',');
-            output_string.push(' ');
-        }
-
-        output_string.push(']');
-
-        output_file.write_all(output_string.as_bytes()).unwrap();
-        output_file.write(b"\n").unwrap();
+        write_to_file(&encoded, &mut output_file);
     }
 }
 
